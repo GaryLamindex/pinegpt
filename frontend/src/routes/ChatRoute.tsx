@@ -60,7 +60,7 @@ export function ChatRoute() {
     if (writingFormat) message.push(writingFormat);
     if (message.length === 0)
       message.push(
-        "You are Financial Advisor, a advisor that helps gives financial opinion base the the pinescript that is provided.  Do not give financial advice that is not based on the pinescript."
+        "You are Financial Advisor, a advisor that helps gives financial opinion base the the strategy statistic that is provided."
       );
     return message.join(" ");
   };

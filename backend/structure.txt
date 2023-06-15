@@ -1,0 +1,21 @@
+Basic setting: DICT(table_name, table_dir, db_mode, data_freq, user_id, store_mongoDB, strategy_initial, video_link, documents_link, tags_array, subscribers_num, rating_dict, margin_ratio, trader_name),  
+Fixed param : DICT(time_period, initial_amount) 
+Vairable param : ARRAY(margin_ratio, ticker) 
+
+Backtest:
+Application define all the Basic setting & Fixed param & Vairable param
+init backtest object (Basic setting, Fixed param, Vairable param)
+loop through param => control params [control params that is to backtest] , plot_all_file_graph, cal_stat for each loop 
+backtest_exec:  determine execution based on time => create agents when when time = 0 [Define a structure for backtesting, then create time for looping in that structure] and create time loop to call run() 
+sim agent: create paths, file structure (create folder stucture using the given [table_name, table_dir] **not create the table on its own)
+run(): get stock data, call indicator , call algorithm(stock data, indicator) , write action to database [to mimic a human being collecting information and action at a particular time]
+algorithm : init indictor class, and generate indicator base on var_param, create buy/sell signal at a particular time [to mimic a human being doing a buy/sell calculation base on all information collected]
+indicator:  DO NOT store any data in this class, only do calaculation base on market.  Do calculation with stock data engine 
+
+===========================================================
+Realtime:
+Frontend Application define all the Basic setting & Fixed param & Vairable param
+init realtime object (Basic setting, Fixed param, Vairable param)
+realtime_exec -> determine execution based on time => init_backtest and create agents when when time = 0 [Define a structure for real time, then create time history for looping in that structure, check the time and new data]
+run() -> get stock data , call indicator, call algorithm(stock data, indicator) , write action to database [Mimic human collect info then perform action at a particular time]
+algorithm : base on indictor , create buy/sell signal at a particular time [to mimic a human being doing a buy/sell calculation base on all information collected]

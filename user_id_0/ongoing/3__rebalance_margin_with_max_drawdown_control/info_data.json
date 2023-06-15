@@ -1,0 +1,43 @@
+{
+    "strategy_name": "rebalance_margin_wif_max_drawdown_control",
+    "user_id": 0,
+    "table_name": "3__rebalance_margin_with_max_drawdown_control",
+    "cal_stat": true,
+    "data_freq": "one_day",
+    "db_mode": {
+        "dynamo_db": false,
+        "local": true
+    },
+    "restart": true,
+    "quick_test": true,
+    "initial_amount": 1000000,
+    "start_date": "2015-06-03 00:00:00",
+    "end_date": "2016-06-03 00:00:00",
+    "start_timestamp": 1433260800.0,
+    "end_timestamp": 1464883200.0,
+    "info_param": {
+        "store_mongoDB": false,
+        "strategy_initial": "rebalance_margin_with_max_drawdown_control",
+        "video_link": null,
+        "documents_link": null,
+        "tags_array": null,
+        "subscribers_num": null,
+        "rating_dict": null,
+        "margin_ratio": 3.24,
+        "trader_name": null
+    },
+    "var_param": {
+        "rebalance_margin": 0.09,
+        "maintain_margin": 0.01,
+        "max_drawdown_ratio": 0.005,
+        "purchase_exliq": 5.0,
+        "tickers": [
+            "QQQ"
+        ],
+        "acceptance_range": 0
+    },
+    "tickers": [
+        "QQQ"
+    ],
+    "bond": []
+}
