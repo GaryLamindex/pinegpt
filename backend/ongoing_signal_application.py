@@ -1,5 +1,6 @@
 from algo.accelerating_dual_momentum.backtest import backtest as AccelDualMomentumBacktest
 from algo.rebalance_margin_wif_max_drawdown_control.backtest import backtest as RebalanceMarginWithMaxDrawdownControlBacktest
+from engine.backtest_engine.grab_yfinance_data import yfinance_data_engine
 from threading import Thread, Lock
 from datetime import datetime as dt
 import os
@@ -40,8 +41,9 @@ class OngoingSignalApplication:
 
         fixed_param = {
             'initial_amount': 1000000,
-            'start_date': dt(2015, 6, 3),
-            'end_date': dt(2016, 6, 3)
+            'start_date': dt(2013, 1, 1),
+            'end_date': dt(2020, 1, 1)
+            # 'end_date': dt.now()
         }
 
         info_param = {
@@ -59,7 +61,7 @@ class OngoingSignalApplication:
         # Initialize the backtest object
         # replace 'RebalanceMarginWithMaxDrawdownControlBacktest' with your actual backtest class
         backtest = RebalanceMarginWithMaxDrawdownControlBacktest(basic_setting, fixed_param, var_param, info_param)
-
+        self.download_y_finance_data(var_param['tickers'])
         backtest.backtest_exec()
         # Update database.json
         self.update_database_json(table_id, strategy_name, display_name, table_name)
@@ -72,7 +74,7 @@ class OngoingSignalApplication:
         table_dir.mkdir(parents=True, exist_ok=True)
 
         start_date = dt(2015, 1, 1)
-        end_date = dt(2020, 1, 1)
+        end_date = dt(2022, 1, 1)
         # Define your parameter maps
         basic_setting = {
             'table_dir': table_dir,  # assuming self.table_list_dir and table_name are defined
@@ -116,7 +118,27 @@ class OngoingSignalApplication:
         # Update database.json
         
 
+    def download_y_finance_data(self, tickers):
+            ticker_data_path = str(Path(__file__).parent.parent.resolve()) + '/ticker_data/one_day'
+            ticker_name_path = str(Path(__file__).parent.parent.resolve()) + '/etf_list'
+            
+            print("Ticker data path:", ticker_data_path)
+            print("Ticker name path:", ticker_name_path)
 
+            engine = yfinance_data_engine(ticker_data_path, ticker_name_path)
+
+            for ticker in tickers:
+
+                df = engine.get_yfinance_max_historical_data(ticker)
+                index_list = df.index.tolist()
+                timestamp = list()
+                for x in range(len(index_list)):
+                    timestamp.append(int(index_list[x].timestamp()))
+                df['timestamp'] = timestamp
+                df = df.rename(columns={'Open': 'open'})
+                df.to_csv(f"{engine.ticker_data_path}/{ticker}.csv", index=True, header=True)
+                print(f"Successfully downloaded {ticker}.csv")
+                
 
     def restart(self):
         # delete everything under self.table_list_dir
@@ -129,115 +151,84 @@ class OngoingSignalApplication:
         if database_path.exists():
             database_path.unlink()
 
-        # define var_params for accelerating daul momentum backtest_exec 
-        user_ids = [0, 0]  # define the user_ids here
-        var_params = [
-            {
-                'tickers': ["SPY", "QQQ"],
-                'bond': ["TIP"],
-            }, 
-            {
-                'tickers': ["SPY", "ARKK"],
-                'bond': ["TIP"]
-            }
-        ]
-
-        display_names = ["SPY QQQ Accel Dual Momentum", "SPY ARKK Accel Dual Momentum"]  # user-defined display names
-        
         # # define var_params for accelerating daul momentum backtest_exec 
-        # user_ids = [0]  # define the user_ids here
+        # user_ids = [0, 0]  # define the user_ids here
         # var_params = [
         #     {
         #         'tickers': ["SPY", "QQQ"],
         #         'bond': ["TIP"],
+        #     }, 
+        #     {
+        #         'tickers': ["SPY", "ARKK"],
+        #         'bond': ["TIP"]
         #     }
         # ]
 
-        # display_names = ["SPY QQQ Accel Dual Momentum"]  # user-defined display names
+        # display_names = ["SPY QQQ Accel Dual Momentum", "SPY ARKK Accel Dual Momentum"]  # user-defined display names
+
+        # for user_id, var_param, display_name in zip(user_ids, var_params, display_names):
+        #     table_id = self.get_next_table_id()
+        #     strategy_name = "accelerating_dual_momentum"
+        #     table_name = str(table_id) + "__" + strategy_name
+        #     self.update_database_json(table_id, strategy_name, display_name, table_name)
+
+        #     t = Thread(target=self.run_accelerating_dual_momentum, args=(user_id, var_param, display_name, table_id))
+        #     threads.append(t)
 
 
-        for user_id, var_param, display_name in zip(user_ids, var_params, display_names):
+        #loop thorugh params for rebalance_margin_wif_max_drawdown_control 
+        target_leverage_dict = {"start":25, "end":35, "step":10}
+        # Append threads and pre-generate table IDs for run_rebalance_margin_with_max_drawdown_control
+        for leverage in range(target_leverage_dict.get("start"), target_leverage_dict.get("end"), target_leverage_dict.get("step")):
+
+            var_param = {
+                'leverage': leverage/10,
+                "tickers": ["TQQQ"]
+            }
+            
             table_id = self.get_next_table_id()
-            strategy_name = "accelerating_dual_momentum"
+            strategy_name = "rebalance_margin_with_max_drawdown_control"
             table_name = str(table_id) + "__" + strategy_name
-            self.update_database_json(table_id, strategy_name, display_name, table_name)
+            display_name = f"Target Leverage {leverage}"
 
-            t = Thread(target=self.run_accelerating_dual_momentum, args=(user_id, var_param, display_name, table_id))
+            user_id = 0
+            self.update_database_json(table_id, strategy_name, display_name, table_name)
+            
+            t = Thread(target=self.run_rebalance_margin_with_max_drawdown_control, args=(user_id, var_param, display_name, table_id))
             threads.append(t)
 
 
+        # Start all threads
+        for thread in threads:
+            thread.start()
+            
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
+
+    def daily_restart(self):
+        
         #loop thorugh params for rebalance_margin_wif_max_drawdown_control 
-        rabalance_dict = {"start":80, "end":100, "step":10}
-        maintain_dict = {"start":1, "end":2, "step":1}
-        purchase_exliq_ratio_dict = {"start":500, "end":502, "step":2}
-        max_drawdown_ratio_dict = {"start": 5, "end": 7, "step": 2}
-
+        target_leverage_dict = {"start":25, "end":35, "step":10}
         # Append threads and pre-generate table IDs for run_rebalance_margin_with_max_drawdown_control
-        for rebalance in range(rabalance_dict.get("start"), rabalance_dict.get("end"), rabalance_dict.get("step")):
-            for max_drawdown in range(max_drawdown_ratio_dict.get("start"), max_drawdown_ratio_dict.get("end"), max_drawdown_ratio_dict.get("step")):
-                for purchase_exliq_ratio in range(purchase_exliq_ratio_dict.get("start"), purchase_exliq_ratio_dict.get("end"), purchase_exliq_ratio_dict.get("step")):
+        for leverage in range(target_leverage_dict.get("start"), target_leverage_dict.get("end"), target_leverage_dict.get("step")):
 
+            var_param = {
+                'leverage': leverage/10,
+                "tickers": ["TQQQ"]
+            }
+            
+            table_id = self.get_next_table_id()
+            strategy_name = "rebalance_margin_with_max_drawdown_control"
+            table_name = str(table_id) + "__" + strategy_name
+            display_name = f"Target Leverage {leverage}"
 
+            user_id = 0
+            self.update_database_json(table_id, strategy_name, display_name, table_name)
+            
+            t = Thread(target=self.run_rebalance_margin_with_max_drawdown_control, args=(user_id, var_param, display_name, table_id))
+            threads.append(t)
 
-                    rebalance_margin = rebalance / 1000
-                    maintain_margin = 0.01
-                    max_drawdown_ratio = max_drawdown / 1000
-                    purchase_exliq = purchase_exliq_ratio / 100
-                    acceptance_range = 0
-
-                    var_param = {
-                        'rebalance_margin': rebalance_margin,
-                        "maintain_margin": maintain_margin,
-                        'max_drawdown_ratio': max_drawdown_ratio,
-                        'purchase_exliq': purchase_exliq,
-                        "tickers": ["QQQ"],
-                        "acceptance_range": acceptance_range
-                    }
-                    
-                    table_id = self.get_next_table_id()
-                    strategy_name = "rebalance_margin_with_max_drawdown_control"
-                    table_name = str(table_id) + "__" + strategy_name
-                    display_name = f"Rebalance Margin {rebalance_margin}, Max Drawdown Ratio {max_drawdown_ratio}, Purchase Exliq {purchase_exliq}"
-
-                    user_id = 0
-                    self.update_database_json(table_id, strategy_name, display_name, table_name)
-                    
-                    t = Thread(target=self.run_rebalance_margin_with_max_drawdown_control, args=(user_id, var_param, display_name, table_id))
-                    threads.append(t)
-
-
-        #loop thorugh params for rebalance_margin_wif_max_drawdown_control 
-        rabalance_dict = {"start":80, "end":100, "step":10}
-        maintain_dict = {"start":1, "end":2, "step":1}
-        purchase_exliq_ratio_dict = {"start":500, "end":502, "step":2}
-        max_drawdown_ratio_dict = {"start": 5, "end": 7, "step": 2}
-
-        # Append threads and pre-generate table IDs for run_rebalance_margin_with_max_drawdown_control
-        for rebalance in range(rabalance_dict.get("start"), rabalance_dict.get("end"), rabalance_dict.get("step")):
-            for max_drawdown in range(max_drawdown_ratio_dict.get("start"), max_drawdown_ratio_dict.get("end"), max_drawdown_ratio_dict.get("step")):
-                for purchase_exliq_ratio in range(purchase_exliq_ratio_dict.get("start"), purchase_exliq_ratio_dict.get("end"), purchase_exliq_ratio_dict.get("step")):
-
-                    table_id = self.get_next_table_id()
-                    user_id = 0
-
-                    rebalance_margin = rebalance / 1000
-                    maintain_margin = 0.01
-                    max_drawdown_ratio = max_drawdown / 1000
-                    purchase_exliq = purchase_exliq_ratio / 100
-                    acceptance_range = 0
-
-                    var_param = {
-                        'rebalance_margin': rebalance_margin,
-                        "maintain_margin": maintain_margin,
-                        'max_drawdown_ratio': max_drawdown_ratio,
-                        'purchase_exliq': purchase_exliq,
-                        "tickers": ["SPY"],
-                        "acceptance_range": acceptance_range
-                    }
-
-                    display_name = f"Rebalance Margin {rebalance_margin}, Max Drawdown Ratio {max_drawdown_ratio}, Purchase Exliq {purchase_exliq}"
-                    t = Thread(target=self.run_rebalance_margin_with_max_drawdown_control, args=(user_id, var_param, display_name, table_id))
-                    threads.append(t)
 
         # Start all threads
         for thread in threads:

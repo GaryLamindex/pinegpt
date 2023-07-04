@@ -8,10 +8,12 @@ import { Notifications } from "@mantine/notifications";
 import {
   createHashHistory,
   ReactLocation,
-  Router,
+  Router,Route
 } from "@tanstack/react-location";
 import { ChatRoute } from "../routes/ChatRoute";
 import { IndexRoute } from "../routes/IndexRoute";
+import { StrategyRoute } from '../routes/StrategyRoute'; // import the StrategyRoute component
+console.log(StrategyRoute);
 import { Layout } from "./Layout";
 
 const history = createHashHistory();
@@ -34,9 +36,12 @@ export function App() {
   return (
     <Router
       location={location}
+      onError={(error) => console.log('Routing error:', error)}
       routes={[
+        // { path: "/strategy/:id", element: <StrategyRoute /> },
         { path: "/", element: <IndexRoute /> },
         { path: "/chats/:chatId", element: <ChatRoute /> },
+         // added new route
       ]}
     >
       <ColorSchemeProvider
@@ -112,5 +117,6 @@ export function App() {
         </MantineProvider>
       </ColorSchemeProvider>
     </Router>
+
   );
 }

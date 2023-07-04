@@ -77,10 +77,12 @@ def get_all_data(table_id):
     drawdown_csv_path = os.path.join(folder_path, 'stats_data', "drawdown_abstract.csv")
     run_data_csv_path = os.path.join(folder_path, 'run_data', f"{folder_name}.csv")
     info_data_csv_path = os.path.join(folder_path, 'info_data.json')
+    transaction_data_csv_path = os.path.join(folder_path, 'transaction_data', f"{folder_name}.csv")
     
     stats_data = pd.read_csv(stats_csv_path).to_json(orient='records')
     drawdown_data = pd.read_csv(drawdown_csv_path).to_json(orient='records')
     run_data = pd.read_csv(run_data_csv_path).to_json(orient='records')
+    transaction_data = pd.read_csv(transaction_data_csv_path).to_json(orient='records')
     # Read the info_data.txt as a text file, not a csv file
     with open(info_data_csv_path, 'r') as file:
         info_data = file.read()
@@ -90,6 +92,7 @@ def get_all_data(table_id):
         'drawdown_data': json.loads(drawdown_data),
         'run_data': json.loads(run_data),
         'info_data': info_data,
+        'transaction_data': json.loads(transaction_data)
     })
 
 # create an instance of OngoingSignalApplication

@@ -99,12 +99,21 @@ class backtest_portfolio_data_engine(object):
         tickers = [r['ticker'] for r in portfolio]
         NetLiquidation = mkt_value.get("NetLiquidation")
 
+        if NetLiquidation == 0:
+            Leverage = 0
+        else:
+            Leverage = GrossPositionValue / NetLiquidation
+
         for ticker in tickers:
             ticker_item = self.acc_data.get_portfolio_ticker_item(ticker)
             costBasis = ticker_item.get("costBasis")
             try:
-                ticker_init_margin = costBasis * self.acc_data.get_margin_info_ticker_item(ticker).get("initMarginReq")
-                ticker_mnt_margin = costBasis * self.acc_data.get_margin_info_ticker_item(ticker).get("maintMarginReq")
+                if Leverage<=1:
+                    ticker_init_margin = ticker_item.get("marketValue") * self.acc_data.get_margin_info_ticker_item(ticker).get("initMarginReq")
+                    ticker_mnt_margin = ticker_item.get("marketValue") * self.acc_data.get_margin_info_ticker_item(ticker).get("maintMarginReq")
+                else:
+                    ticker_init_margin = costBasis * self.acc_data.get_margin_info_ticker_item(ticker).get("initMarginReq")
+                    ticker_mnt_margin = costBasis * self.acc_data.get_margin_info_ticker_item(ticker).get("maintMarginReq")
             except AttributeError:
                 ticker_init_margin = costBasis
                 ticker_mnt_margin = costBasis
@@ -124,10 +133,7 @@ class backtest_portfolio_data_engine(object):
         #       TotalCashValue, "; FullInitMarginReq:", FullInitMarginReq, "; FullMaintMarginReq:", FullMaintMarginReq,
         #       "; EquityWithLoanValue:", EquityWithLoanValue, "; AvailableFunds:", AvailableFunds, ";BuyingPower:",
         #       BuyingPower, "; ExcessLiquidity:", ExcessLiquidity)
-        if NetLiquidation == 0:
-            Leverage = 0
-        else:
-            Leverage = GrossPositionValue / NetLiquidation
+
 
         self.acc_data.update_margin_acc(FullInitMarginReq, FullMaintMarginReq)
         self.acc_data.update_trading_funds(AvailableFunds, ExcessLiquidity, BuyingPower, Leverage,

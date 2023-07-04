@@ -11,11 +11,16 @@ class yfinance_data_engine:
     ticker_name_path = None
     ticker_data_path = None
 
-    def __init__(self):
-        self.ticker_data_path = str(pathlib.Path(__file__)
-                                    .parent.parent.parent.parent.resolve()) + '/ticker_data/one_day'
-        self.ticker_name_path = str(pathlib.Path(__file__)
-                                    .parent.parent.parent.parent.resolve()) + '/etf_list'
+
+
+    def __init__(self, ticker_data_path, ticker_name_path):
+        self.ticker_data_path = ticker_data_path
+        self.ticker_name_path = ticker_name_path
+
+        if not os.path.isdir(ticker_data_path):
+            os.makedirs(ticker_data_path)
+        if not os.path.isdir(ticker_name_path):
+            os.makedirs(ticker_name_path)
 
     def get_yfinance_max_historical_data(self, ticker):
         btc = yf.Ticker(ticker)
@@ -53,27 +58,51 @@ class yfinance_data_engine:
         df.to_csv(f"{self.ticker_name_path}/ticker_name.csv", index=False)
 
 
-def main():
-    engine = yfinance_data_engine()
-    if not os.path.isdir(engine.ticker_data_path):
-        os.makedirs(engine.ticker_data_path)
-    if not os.path.isdir(engine.ticker_name_path):
-        os.makedirs(engine.ticker_name_path)
-    file_exists = os.path.exists(f"{engine.ticker_name_path}/ticker_name.csv")
-    if not file_exists:
-        engine.get_ticker_name()
-    ticker_name = pd.read_csv(f"{engine.ticker_name_path}/ticker_name.csv")
-    for ticker in ticker_name['Ticker']:
-        df = engine.get_yfinance_max_historical_data(ticker)
-        index_list = df.index.tolist()
-        timestamp = list()
-        for x in range(len(index_list)):
-            timestamp.append(int(index_list[x].timestamp()))
-        df['timestamp'] = timestamp
-        df = df.rename(columns={'Open': 'open'})
-        df.to_csv(f"{engine.ticker_data_path}/{ticker}.csv", index=True, header=True)
-        print(f"Successfully download {ticker}.csv")
+# def main():
+#     engine = yfinance_data_engine()
+#     if not os.path.isdir(engine.ticker_data_path):
+#         os.makedirs(engine.ticker_data_path)
+#     if not os.path.isdir(engine.ticker_name_path):
+#         os.makedirs(engine.ticker_name_path)
+#     file_exists = os.path.exists(f"{engine.ticker_name_path}/ticker_name.csv")
+#     if not file_exists:
+#         engine.get_ticker_name()
+#     ticker_name = pd.read_csv(f"{engine.ticker_name_path}/ticker_name.csv")
+#     for ticker in ticker_name['Ticker']:
+#         df = engine.get_yfinance_max_historical_data(ticker)
+#         index_list = df.index.tolist()
+#         timestamp = list()
+#         for x in range(len(index_list)):
+#             timestamp.append(int(index_list[x].timestamp()))
+#         df['timestamp'] = timestamp
+#         df = df.rename(columns={'Open': 'open'})
+#         df.to_csv(f"{engine.ticker_data_path}/{ticker}.csv", index=True, header=True)
+#         print(f"Successfully download {ticker}.csv")
 
+def main():
+
+
+    ticker_data_path = str(pathlib.Path(__file__)
+                                .parent.parent.parent.parent.resolve()) + '/ticker_data/one_day'
+    ticker_name_path = str(pathlib.Path(__file__)
+                                .parent.parent.parent.parent.resolve()) + '/etf_list'
+    
+    print("Ticker data path:", ticker_data_path)
+    print("Ticker name path:", ticker_name_path)
+
+    engine = yfinance_data_engine(ticker_data_path, ticker_name_path)
+
+
+    ticker = "TQQQ"
+    df = engine.get_yfinance_max_historical_data(ticker)
+    index_list = df.index.tolist()
+    timestamp = list()
+    for x in range(len(index_list)):
+        timestamp.append(int(index_list[x].timestamp()))
+    df['timestamp'] = timestamp
+    df = df.rename(columns={'Open': 'open'})
+    df.to_csv(f"{engine.ticker_data_path}/{ticker}.csv", index=True, header=True)
+    print(f"Successfully downloaded {ticker}.csv")
 
 if __name__ == '__main__':
     main()

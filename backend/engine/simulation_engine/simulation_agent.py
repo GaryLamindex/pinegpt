@@ -254,9 +254,9 @@ class simulation_agent(object):
                     sim_data_res.update({f"{str(key)}_{ticker} ": val })
                     temp_key = f"{str(key)}_{ticker} "
                     
-            if temp_key not in self.list_header:
-                self.list_header.append(temp_key)
-                self.header_update = True
+                    if temp_key not in self.list_header:
+                        self.list_header.append(temp_key)
+                        self.header_update = True
 
             ticker_data_res.update({f"mktPrice_{ticker} ": ticker_data[ticker]['last']})
 
@@ -385,7 +385,6 @@ class simulation_agent(object):
                 return json.JSONEncoder.default(self, obj)
         
         data_dict = self.acc_data.return_acc_data()
-        print("data_dict:",data_dict)
         self.acc_data_file_path_json = os.path.join(self.acc_data_dir, f"{self.table_name}.json")
 
         with open(self.acc_data_file_path_json, 'w') as f:

@@ -7,6 +7,7 @@ Now put everything together for simplicity, but better separate the base class a
 import math
 import sys
 import pathlib
+import random
 from datetime import datetime
 
 from dateutil.relativedelta import relativedelta
@@ -42,7 +43,7 @@ class rebalance_margin_wif_max_drawdown:
     max_stock_price = {}
     benchmark_drawdown_price = {}
 
-    rebalance_margin = 0
+    target_leverage = 0
 
     # however, different stock may have different maintenance margin, just don't consider it here
     maintain_margin = 0.01
@@ -54,21 +55,23 @@ class rebalance_margin_wif_max_drawdown:
     account_snapshot = {}
     action_msgs = []
 
+    middle_month_operation = False
     last_exec_datetime_obj = None
     last_max_drawdown_control_operation_datetime_obj = None
+    frenzi_fuse_ratio = 1.2
     loop = 0
 
-    def __init__(self, trade_agent, portfolio_agent, tickers, max_drawdown_ratio, acceptance_range, rebalance_margin):
+    def __init__(self, trade_agent, portfolio_agent, tickers, target_leverage):
 
         self.trade_agent = trade_agent
         self.portfolio_agent = portfolio_agent
         self.tickers = tickers
         self.number_of_stocks = len(tickers)
-        self.max_drawdown_ratio = max_drawdown_ratio
 
-        self.acceptance_range = acceptance_range
-        self.rebalance_margin = rebalance_margin
-        self.maintain_margin = rebalance_margin
+        self.target_leverage = target_leverage
+        self.maintain_margin = 0.001
+
+        self.last_exec_price = {ticker: [0, 0] for ticker in tickers}
 
         for ticker in self.tickers:
             self.max_stock_price.update({ticker: 0})
@@ -77,6 +80,7 @@ class rebalance_margin_wif_max_drawdown:
             self.reg_exec.update({ticker: False})
             self.liq_sold_qty_dict.update({ticker: 0})
             self.liq_sold_price_dict.update({ticker: 0})
+            
 
     # directly called to run the algorithm once
     def run(self, realtime_stock_data_dict, timestamp):
@@ -114,9 +118,18 @@ class rebalance_margin_wif_max_drawdown:
                 print("capital_for_each_stock", capital_for_each_stock)
                 for ticker in temp_ticker:
                     ticker_price = realtime_stock_data_dict.get(ticker)['last']
-                    share_purchase = math.floor(capital_for_each_stock / ticker_price) * 5  # 5x leverage
+                    share_purchase = math.floor(capital_for_each_stock / ticker_price) * self.target_leverage  # 2x leverage
+                    print("share_purchase:", share_purchase, "; ticker_price:", ticker_price, "; target_leverage:", self.target_leverage)
+
                     action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, {'ticker': ticker, 'position_purchase': share_purchase})
                     self.action_msgs.append(action_msg)
+                    
+                    self.last_exec_price[ticker] = [ticker_price, ticker_price]
+
+                    if self.max_drawdown_dodge[ticker]:
+                        self.update_benchmark_drawdown_price_after_dodge(ticker, ticker_price)
+                    else:
+                        self.update_max_and_benchmark_price_before_dodge(ticker, ticker_price)
                 self.last_max_drawdown_control_operation_datetime_obj = datetime_obj
             else:
 
@@ -124,60 +137,74 @@ class rebalance_margin_wif_max_drawdown:
                     self.last_max_drawdown_control_operation_datetime_obj = datetime_obj
                     for ticker in temp_ticker:
 
-                        target_ex_liq = self.rebalance_margin * float(self.account_snapshot.get("GrossPositionValue"))
-                        print("target_ex_liq:",target_ex_liq)
+                        # target_ex_liq = self.rebalance_margin * float(self.account_snapshot.get("GrossPositionValue"))
+                        # print("target_ex_liq:",target_ex_liq)
 
                         ticker_price = float(realtime_stock_data_dict.get(ticker)['last'])
                         
-
                         if self.max_drawdown_dodge[ticker]:  # the stock is dodged
                             print("self.max_drawdown_dodge[ticker]", self.max_drawdown_dodge[ticker])
                             buying_power = float(self.account_snapshot.get("BuyingPower"))
                             if self.check_buy_back(ticker, ticker_price):
                                 action_msg = self.buy_back_position(ticker, ticker_price, buying_power, timestamp)  # the function handled writing of action message
                                 self.action_msgs.append(action_msg)
-                            else:
-                                # self.time_avg_buy_back(ticker, ticker_price, buying_power, timestamp)
-                                pass
+
+
                         else:  # didn't dodge
                             # see if it needs to dodge
-                            print("check if dodge:  ticker_price:", ticker_price, "; benchmark_drawdown_price:",
-                                    self.benchmark_drawdown_price.get(ticker))
-                            # if self.is_max_drawdown_dodge(ticker, ticker_price):
+                            print("check if dodge: didn't dodge. ticker_price:", ticker_price, "; benchmark_drawdown_price:", self.benchmark_drawdown_price.get(ticker))
+
                             if self.check_max_drawdown_dodge(ticker, ticker_price):  # needs to dodge
-                                action_msg = self.liquidate_stock_position(ticker, ticker_price,timestamp)
-                                self.action_msgs.append(action_msg)
+                                target_sold_position = self.liquidate_stock_position(ticker, ticker_price,timestamp, "partial")
+                                if target_sold_position > 0:
+                                    action_msg = IBActionsTuple(timestamp, IBAction.SELL_MKT_ORDER, 
+                                                                {'ticker': ticker, 'position_sell': target_sold_position})
+                                    print(f"Added SELL_MKT_ORDER action for {ticker} with position_sell = {target_sold_position}")
+                                    self.action_msgs.append(action_msg)
+                                    
+                            else:  
 
-                            else:  # doesn't need to dodge
-                                if float(self.account_snapshot.get("ExcessLiquidity")) > target_ex_liq and ticker_price > self.last_exec_price.get(ticker, 0) * 1.005:
-                                    ex_liq_diff = float(
-                                        self.account_snapshot.get("ExcessLiquidity")) - target_ex_liq
-                                    target_share_purchase = math.floor(ex_liq_diff / ticker_price)*4
+                                if float(self.account_snapshot.get("Leverage")) < self.target_leverage and not any(ticker_price > price*self.frenzi_fuse_ratio for price in self.last_exec_price[ticker]):
+                                    print("Current Leverage:", float(self.account_snapshot.get("Leverage")), "Target Leverage:", self.target_leverage)
 
+                                    current_position = float(self.account_snapshot.get(f"position_{ticker}"))
+                                    no_leverage_position = (float(
+                                        self.account_snapshot.get("EquityWithLoanValue")) / self.number_of_stocks) / float(
+                                        self.account_snapshot.get(f"marketPrice_{ticker}"))
+                                    target_leverage_position_at_rebalanced_state = no_leverage_position* self.target_leverage
+                                    print("liquidate_stock_position::current_position:", current_position)
+                                    print("liquidate_stock_position::no_leverage_position:", no_leverage_position)  # corrected variable name
+                                    target_share_purchase = math.floor(target_leverage_position_at_rebalanced_state - current_position)
                                     if target_share_purchase > 0:
                                         action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, {'ticker': ticker, 'position_purchase': target_share_purchase})
-                                        self.action_msgs.append(action_msg)
-                                        
-                        self.last_exec_price[ticker] = ticker_price
+                                        self.action_msgs.append(action_msg)    
 
+                        # Update last_exec_price
+                        # Pop the oldest price and append the current price
+                        self.last_exec_price[ticker].pop(0)
+                        self.last_exec_price[ticker].append(ticker_price)
+                                            
+                        if self.max_drawdown_dodge[ticker]:
+                            self.update_benchmark_drawdown_price_after_dodge(ticker, ticker_price)
+                        else:
+                            self.update_max_and_benchmark_price_before_dodge(ticker, ticker_price)
 
                     self.last_exec_datetime_obj = datetime_obj
-
-                    for ticker in temp_ticker:
-                        real_time_ticker_price = float(realtime_stock_data_dict.get(ticker)['last'])
-                        if self.max_drawdown_dodge.get(ticker):
-                            self.update_benchmark_drawdown_price_after_dodge(ticker, real_time_ticker_price)
-                        else:
-                            self.update_max_and_benchmark_price_before_dodge(ticker, real_time_ticker_price)
                 else:
-                    ticker_price = float(realtime_stock_data_dict.get(ticker)['last'])
-                    main_ex_liq = 0.005 * float(self.account_snapshot.get("GrossPositionValue"))
-                    if float(self.account_snapshot.get("ExcessLiquidity")) < main_ex_liq:
-                        ex_liq_diff = main_ex_liq - float(self.account_snapshot.get("ExcessLiquidity"))
-                        target_share_sell = math.floor(ex_liq_diff / ticker_price) * 2
-                        if target_share_sell > 0:
-                            action_msg = IBActionsTuple(timestamp, IBAction.SELL_MKT_ORDER,{'ticker': ticker, 'position_sell': target_share_sell})
-                            self.action_msgs.append(action_msg)
+                    for ticker in temp_ticker:
+                        ticker_price = float(realtime_stock_data_dict.get(ticker)['last'])
+                        if any(ticker_price > price*self.frenzi_fuse_ratio for price in self.last_exec_price[ticker]) and all(ticker_price > price*1.06 for price in self.last_exec_price[ticker]):
+                            target_sold_position = self.liquidate_stock_position(ticker, ticker_price,timestamp, "frenzi")
+                            if target_sold_position > 0:
+                                action_msg = IBActionsTuple(timestamp, IBAction.SELL_MKT_ORDER, 
+                                                            {'ticker': ticker, 'position_sell': target_sold_position})
+                                print(f"Added SELL_MKT_ORDER action for {ticker} with position_sell = {target_sold_position}")
+                                self.action_msgs.append(action_msg)
+                        # elif ticker_price > self.last_exec_price[ticker][-1] * 1.1:
+                        #     action_msg = self.liquidate_stock_position(ticker, ticker_price,timestamp, "frenzi")
+                        #     self.action_msgs.append(action_msg)
+                        
+
             self.loop += 1
             print(f"==========Finish running {self.loop} loop==========")
             return self.action_msgs.copy()
@@ -187,73 +214,117 @@ class rebalance_margin_wif_max_drawdown:
         if (self.max_stock_price.get(ticker) == 0):  # if there is no data for the max and benchmark pric
 
             self.max_stock_price.update({ticker: real_time_ticker_price})
-            benchmark_price = real_time_ticker_price * (1 - self.max_drawdown_ratio)
+            benchmark_price = real_time_ticker_price
             self.benchmark_drawdown_price.update({ticker: benchmark_price})
-        elif real_time_ticker_price > self.max_stock_price.get(ticker):
+            
+        elif real_time_ticker_price >= self.benchmark_drawdown_price.get(ticker) :
             self.max_stock_price.update({ticker: real_time_ticker_price})
-            benchmark_price = real_time_ticker_price * (1 - self.max_drawdown_ratio)
-            self.benchmark_drawdown_price.update({ticker: benchmark_price})
+            self.benchmark_drawdown_price.update({ticker: real_time_ticker_price})
+            print(f"benchmark_drawdown_price[{ticker}]:{self.benchmark_drawdown_price[ticker]}")
 
     def update_benchmark_drawdown_price_after_dodge(self, ticker, real_time_ticker_price):
-        if real_time_ticker_price < self.benchmark_drawdown_price[ticker] * 0.7:
-            target_update_benchmark_drawdown_price = real_time_ticker_price + (
-                    (self.liq_sold_price_dict[ticker] - real_time_ticker_price) * 0.5)
+        if real_time_ticker_price < self.benchmark_drawdown_price[ticker] * 0.5:
+            target_update_benchmark_drawdown_price = real_time_ticker_price + ((self.max_stock_price[ticker] - real_time_ticker_price) * 0.03)
             if target_update_benchmark_drawdown_price < self.benchmark_drawdown_price[ticker]:
                 self.benchmark_drawdown_price[ticker] = target_update_benchmark_drawdown_price
         pass
 
     def check_max_drawdown_dodge(self, ticker, ticker_price):
-        boo = ticker_price < self.benchmark_drawdown_price.get(ticker)
+        print(f"ticker_price:{ticker_price} ; benchmark_drawdown_price[{ticker}]:{self.benchmark_drawdown_price.get(ticker)}")
+        boo = ticker_price < self.benchmark_drawdown_price.get(ticker)*1.03 
         return boo
 
     def check_buy_back(self, ticker, ticker_price):
-        range_price = self.benchmark_drawdown_price.get(ticker) * (1 + 0.01)
-        return ticker_price > range_price
+        boo1 = False
+        boo2 = False
+        if self.middle_month_operation == False:
+            if ticker_price > self.benchmark_drawdown_price.get(ticker) * 1.03:
+                boo1 = True
+                print(f"{ticker} ticker_price:{ticker_price} >= {ticker} benchmark_price:{self.benchmark_drawdown_price.get(ticker) * 1.03}")
+            # if all(ticker_price > price*self.frenzi_fuse_ratio for price in self.last_exec_price[ticker]):
+            #     boo2 = True
+            #     print("self.last_exec_price[ticker]:",self.last_exec_price[ticker])
+            #     print(f"{ticker} ticker_price:{ticker_price} >= {ticker} last_exec_price:{any(price*self.frenzi_fuse_ratio for price in self.last_exec_price[ticker])}")
+            #     breakpoint()
+
+
+        return boo1 or boo2
 
     
     def buy_back_position(self, ticker, ticker_price, buying_power, timestamp):
         print(f"{ticker} ticker_price >= {ticker} benchmark_price")
-        target_share_purchases = self.liq_sold_qty_dict.get(ticker)
-        print("liq_sold_qty_dict")
-        print(self.liq_sold_qty_dict.get(ticker))
-        purchase_amount = target_share_purchases * ticker_price
-        if buying_power >= purchase_amount:
-            action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, 
-                                        {'ticker': ticker, 'position_purchase': target_share_purchases})
-        else:
-            target_share_purchases = math.floor(buying_power / ticker_price)
-            action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, 
-                                        {'ticker': ticker, 'position_purchase': target_share_purchases})
-
-        # update the benchmark price and the max price after buying back
-        self.max_drawdown_dodge.update({ticker: False})
-        self.max_stock_price[ticker] = ticker_price
-        
-        return action_msg
 
 
-    def liquidate_stock_position(self, ticker, limit_price, timestamp):
         current_position = float(self.account_snapshot.get(f"position_{ticker}"))
         no_leverage_position = (float(
             self.account_snapshot.get("EquityWithLoanValue")) / self.number_of_stocks) / float(
             self.account_snapshot.get(f"marketPrice_{ticker}"))
-        target_leverage_position_at_liquid_state = no_leverage_position
+        target_leverage_position_at_rebalanced_state = no_leverage_position* self.target_leverage
         print("liquidate_stock_position::current_position:", current_position)
         print("liquidate_stock_position::no_leverage_position:", no_leverage_position)  # corrected variable name
-        target_sold_position = math.ceil(current_position - target_leverage_position_at_liquid_state)
+        target_share_purchase = math.floor(target_leverage_position_at_rebalanced_state - current_position)
+        if target_share_purchase > 0:
+            action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, {'ticker': ticker, 'position_purchase': target_share_purchase})
 
-        action_msg = IBActionsTuple(timestamp, IBAction.SELL_MKT_ORDER, 
-                                    {'ticker': ticker, 'position_sell': target_sold_position})
-        print(f"Added SELL_MKT_ORDER action for {ticker} with position_sell = {target_sold_position}")
+        # target_share_purchases = self.liq_sold_qty_dict.get(ticker)
+        # print("liq_sold_qty_dict")
+        # print(self.liq_sold_qty_dict.get(ticker))
+        # purchase_amount = target_share_purchases * ticker_price
+        # if buying_power >= purchase_amount:
+        #     action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, 
+        #                                 {'ticker': ticker, 'position_purchase': target_share_purchases})
+        # else:
+        #     target_share_purchases = math.floor(buying_power / ticker_price)
+        #     action_msg = IBActionsTuple(timestamp, IBAction.BUY_MKT_ORDER, 
+        #                                 {'ticker': ticker, 'position_purchase': target_share_purchases})
 
-        self.benchmark_drawdown_price.update({ticker: limit_price})
-        self.liq_sold_qty_dict.update({ticker: action_msg.args_dict['position_sell']})
-        self.liq_sold_price_dict.update({ticker: limit_price})
-        self.liquidate_sold_value.update({ticker: limit_price * action_msg.args_dict['position_sell']})
-
-        self.max_drawdown_dodge.update({ticker: True})
+        # update the benchmark price and the max price after buying back
+        self.max_drawdown_dodge.update({ticker: False})
+        self.max_stock_price[ticker] = ticker_price
+        self.benchmark_drawdown_price[ticker] = ticker_price 
 
         return action_msg
+
+
+    def liquidate_stock_position(self, ticker, limit_price, timestamp, mode):
+        target_sold_position = 0
+
+        if mode == "partial":
+            current_position = float(self.account_snapshot.get(f"position_{ticker}"))
+            no_leverage_position = (float(
+                self.account_snapshot.get("EquityWithLoanValue")) / self.number_of_stocks) / float(
+                self.account_snapshot.get(f"marketPrice_{ticker}"))
+            target_leverage_position_at_liquid_state = no_leverage_position
+            print("liquidate_stock_position::current_position:", current_position)
+            print("liquidate_stock_position::no_leverage_position:", no_leverage_position)  # corrected variable name
+            target_sold_position = math.ceil(current_position - target_leverage_position_at_liquid_state)
+
+            if target_sold_position > 0:
+                action_msg = IBActionsTuple(timestamp, IBAction.SELL_MKT_ORDER, 
+                                            {'ticker': ticker, 'position_sell': target_sold_position})
+                print(f"Added SELL_MKT_ORDER action for {ticker} with position_sell = {target_sold_position}")
+
+                # self.benchmark_drawdown_price.update({ticker: limit_price})
+                self.liq_sold_qty_dict.update({ticker: action_msg.args_dict['position_sell']})
+                self.liq_sold_price_dict.update({ticker: limit_price})
+                self.liquidate_sold_value.update({ticker: limit_price * action_msg.args_dict['position_sell']})
+
+            self.max_drawdown_dodge.update({ticker: True})
+        elif mode == "frenzi":
+            # breakpoint()
+            current_position = float(self.account_snapshot.get(f"position_{ticker}"))
+            # no_leverage_position = (float(
+            #     self.account_snapshot.get("EquityWithLoanValue")) / self.number_of_stocks) / float(
+            #     self.account_snapshot.get(f"marketPrice_{ticker}"))
+            # target_leverage_position_at_liquid_state = no_leverage_position
+            # print("liquidate_stock_position::current_position:", current_position)
+            # print("liquidate_stock_position::no_leverage_position:", no_leverage_position)  # corrected variable name
+            # target_sold_position = math.ceil(current_position - target_leverage_position_at_liquid_state)
+            target_sold_position = current_position
+
+
+
+        return target_sold_position
 
 
     def check_exec(self, timestamp, **kwargs):
@@ -285,18 +356,43 @@ class rebalance_margin_wif_max_drawdown:
                         f"check_exec: False. last_exec_datetime_obj.month={self.last_exec_datetime_obj.month}; datetime_obj.month={datetime_obj.month}")
                     return False
 
+    # def check_max_drawdown_control_operation(self, timestamp):
+    #     datetime_obj = datetime.utcfromtimestamp(timestamp)
+    #     # next_exec_datetime_obj = self.last_max_drawdown_control_operation_datetime_obj + relativedelta(months=+1)
+    #     # if datetime_obj.month >= next_exec_datetime_obj.month and datetime_obj >= next_exec_datetime_obj:
+    #     if datetime_obj.month != self.last_max_drawdown_control_operation_datetime_obj.month and datetime_obj > self.last_max_drawdown_control_operation_datetime_obj:
+    #         print(
+    #             f"check_exec: True. last_max_drawdown_control_operation_datetime_obj.month={self.last_max_drawdown_control_operation_datetime_obj.month}; datetime_obj.month={datetime_obj.month}")
+    #         return True
+    #     else:
+    #         print(
+    #             f"check_exec: False. last_max_drawdown_control_operation_datetime_obj.month={self.last_max_drawdown_control_operation_datetime_obj.month}; datetime_obj.month={datetime_obj.month}")
+    #         return False
+
     def check_max_drawdown_control_operation(self, timestamp):
         datetime_obj = datetime.utcfromtimestamp(timestamp)
-        # next_exec_datetime_obj = self.last_max_drawdown_control_operation_datetime_obj + relativedelta(months=+1)
-        # if datetime_obj.month >= next_exec_datetime_obj.month and datetime_obj >= next_exec_datetime_obj:
+        
+
         if datetime_obj.month != self.last_max_drawdown_control_operation_datetime_obj.month and datetime_obj > self.last_max_drawdown_control_operation_datetime_obj:
-            print(
-                f"check_exec: True. last_max_drawdown_control_operation_datetime_obj.month={self.last_max_drawdown_control_operation_datetime_obj.month}; datetime_obj.month={datetime_obj.month}")
+            self.middle_month_operation = False
             return True
         else:
-            print(
-                f"check_exec: False. last_max_drawdown_control_operation_datetime_obj.month={self.last_max_drawdown_control_operation_datetime_obj.month}; datetime_obj.month={datetime_obj.month}")
-            return False
+            if self.middle_month_operation == False:
+                last_operation_in_days = self.last_max_drawdown_control_operation_datetime_obj.toordinal()
+                current_datetime_in_days = datetime_obj.toordinal()
+
+                if current_datetime_in_days - last_operation_in_days >= 15:
+                    print(
+                        f"check_exec: True. Last operation was on day {last_operation_in_days}; current day is {current_datetime_in_days}")
+                    self.middle_month_operation = True
+                    return True
+                else:
+                    print(
+                        f"check_exec: False. Last operation was on day {last_operation_in_days}; current day is {current_datetime_in_days}")
+                    return False
+
+        
+
 
     # def check_fuse_liquidation(self, timestamp, realtime_stock_data_dict):
     #     exec_arr = []

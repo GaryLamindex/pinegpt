@@ -23,7 +23,7 @@ from engine.backtest_engine.dividend_engine import dividend_engine
 from object.action_data import IBAction
 from application.realtime_statistic_application import realtime_statistic
 from engine.visualisation_engine import graph_plotting_engine
-
+import sys
 
 def run():
     pass
@@ -108,6 +108,7 @@ class backtest(object):
             else:
                 timestamps = np.intersect1d(timestamps, current_timestamps)
 
+        
         print(f"backtest_exec:timestamps:{timestamps}")
         # Create acc_data, agents, and algorithm 
         print("Create acc_data, agents, and algorithm")
@@ -122,11 +123,10 @@ class backtest(object):
         
 
         #Initiate algorithm with var_param
-        max_drawdown_ratio = self.var_param.get("max_drawdown_ratio")
-        acceptance_range = self.var_param.get("acceptance_range")
-        rebalance_margin = self.var_param.get("rebalance_margin")
-        self.algorithm = rebalance_margin_wif_max_drawdown(self.trade_agent, self.portfolio_data_engine, self.tickers,
-                                                        max_drawdown_ratio, acceptance_range,rebalance_margin)
+        leverage = self.var_param.get("leverage")
+        print(f"leverage:{leverage}")
+
+        self.algorithm = rebalance_margin_wif_max_drawdown(self.trade_agent, self.portfolio_data_engine, self.tickers, leverage)
 
         self.portfolio_data_engine.deposit_cash(self.initial_amount, self.start_timestamp)
 

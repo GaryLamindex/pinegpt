@@ -167,6 +167,7 @@ class local_engine:
         # example of format of "freq": "one_min"
         # self.filepath = str(pathlib.Path(__file__).parent.parent.parent.resolve()) + f"/his_data/{freq}"
         self.filepath = str(pathlib.Path(__file__).parent.parent.parent.parent.resolve()) + f"/ticker_data/{freq}"
+        print("Fetch data from filepath:", self.filepath)
         self.ticker = ticker
         """to be modified"""
         # if freq == "one_day":
